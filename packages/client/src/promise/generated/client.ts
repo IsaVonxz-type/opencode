@@ -13,6 +13,8 @@ import type {
   SessionActiveOutput,
   SessionGetInput,
   SessionGetOutput,
+  SessionRemoveInput,
+  SessionRemoveOutput,
   SessionForkInput,
   SessionForkOutput,
   SessionSwitchAgentInput,
@@ -149,6 +151,8 @@ import type {
   ShellCreateOutput,
   ShellGetInput,
   ShellGetOutput,
+  ShellTimeoutInput,
+  ShellTimeoutOutput,
   ShellOutputInput,
   ShellOutputOutput,
   ShellRemoveInput,
@@ -422,6 +426,17 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ).then((value) => value.data),
+      remove: (input: SessionRemoveInput, requestOptions?: RequestOptions) =>
+        request<SessionRemoveOutput>(
+          {
+            method: "DELETE",
+            path: `/api/session/${encodeURIComponent(input.sessionID)}`,
+            successStatus: 204,
+            declaredStatuses: [404, 400, 401],
+            empty: true,
+          },
+          requestOptions,
+        ),
       fork: (input: SessionForkInput, requestOptions?: RequestOptions) =>
         request<{ readonly data: SessionForkOutput }>(
           {
@@ -1294,6 +1309,19 @@ export function make(options: ClientOptions) {
             method: "GET",
             path: `/api/shell/${encodeURIComponent(input.id)}`,
             query: { location: input["location"] },
+            successStatus: 200,
+            declaredStatuses: [404, 401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      timeout: (input: ShellTimeoutInput, requestOptions?: RequestOptions) =>
+        request<ShellTimeoutOutput>(
+          {
+            method: "PATCH",
+            path: `/api/shell/${encodeURIComponent(input.id)}/timeout`,
+            query: { location: input["location"] },
+            body: { timeout: input["timeout"] },
             successStatus: 200,
             declaredStatuses: [404, 401, 400],
             empty: false,

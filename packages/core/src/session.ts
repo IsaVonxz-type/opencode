@@ -153,6 +153,7 @@ export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly fork: (input: ForkInput) => Effect.Effect<SessionSchema.Info, NotFoundError | MessageNotFoundError>
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly remove: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
     limit?: number
@@ -363,6 +364,15 @@ const layer = Layer.effect(
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
       }),
+      remove: Effect.fn("V2Session.remove")(function* (sessionID) {
+        yield* result.get(sessionID)
+        yield* execution.interrupt(sessionID)
+        yield* execution.awaitIdle(sessionID)
+        const children = yield* result.list({ parentID: sessionID })
+        yield* Effect.forEach(children.data, (child) => result.remove(child.id), { concurrency: 1, discard: true })
+        yield* events.publish(SessionEvent.Deleted, { sessionID })
+        yield* events.remove(sessionID)
+      }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
@@ -529,7 +539,7 @@ const layer = Layer.effect(
             if ((yield* execution.active).has(input.sessionID)) yield* execution.awaitIdle(input.sessionID)
             const started = yield* Effect.gen(function* () {
               const shell = yield* Shell.Service
-              return yield* shell.create({ command: input.command, cwd: session.location.directory })
+              return yield* shell.create({ command: input.command, cwd: session.location.directory, timeout: 0 })
             }).pipe(Effect.provide(locations.get(session.location)))
             yield* events.publish(
               SessionEvent.Shell.Started,
@@ -746,6 +756,7 @@ const materializeAttachment = Effect.fn("V2Session.materializeAttachment")(funct
         start: undefined,
         end: undefined,
         name: undefined,
+        mime: undefined,
       }
     : yield* readFileAttachment(fs, input.uri)
   if (resolved.bytes.byteLength > MAX_ATTACHMENT_BYTES)
@@ -754,7 +765,7 @@ const materializeAttachment = Effect.fn("V2Session.materializeAttachment")(funct
       message: `Attachment exceeds the ${MAX_ATTACHMENT_BYTES} byte limit: ${input.uri}`,
     })
 
-  const mime = Mime.detect(resolved.bytes)
+  const mime = resolved.mime ?? Mime.detect(resolved.bytes)
   const content =
     mime === "text/plain" && resolved.start !== undefined
       ? Buffer.from(
@@ -791,6 +802,25 @@ const readFileAttachment = Effect.fn("V2Session.readFileAttachment")(function* (
   const info = yield* fs.stat(target).pipe(
     Effect.mapError(() => new AttachmentError({ uri, message: `Unable to read attachment: ${uri}` })),
   )
+  if (info.type === "Directory") {
+    const entries = yield* fs.readDirectoryEntries(target).pipe(
+      Effect.mapError(() => new AttachmentError({ uri, message: `Unable to read attachment: ${uri}` })),
+    )
+    return {
+      bytes: Buffer.from(
+        entries
+          .filter((entry) => entry.type === "file" || entry.type === "directory")
+          .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "directory" ? -1 : 1))
+          .map((entry) => entry.name + (entry.type === "directory" ? path.sep : ""))
+          .join("\n"),
+      ),
+      source: { type: "uri" as const, uri },
+      start: undefined,
+      end: undefined,
+      name: path.basename(target),
+      mime: "application/x-directory",
+    }
+  }
   if (info.type !== "File") return yield* new AttachmentError({ uri, message: `Attachment is not a file: ${uri}` })
   if (Number(info.size) > MAX_ATTACHMENT_BYTES)
     return yield* new AttachmentError({
@@ -800,7 +830,7 @@ const readFileAttachment = Effect.fn("V2Session.readFileAttachment")(function* (
   const bytes = yield* fs.readFile(target).pipe(
     Effect.mapError(() => new AttachmentError({ uri, message: `Unable to read attachment: ${uri}` })),
   )
-  return { bytes, source: { type: "uri" as const, uri }, start, end, name: path.basename(target) }
+  return { bytes, source: { type: "uri" as const, uri }, start, end, name: path.basename(target), mime: undefined }
 })
 
 function decodeDataURL(uri: string) {

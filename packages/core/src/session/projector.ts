@@ -26,7 +26,10 @@ import type { DeepMutable } from "../schema"
 import { Slug } from "../util/slug"
 
 type DatabaseService = Database.Interface["db"]
-type MessageEvent = Exclude<SessionEvent.DurableEvent, typeof SessionEvent.Forked.Type>
+type MessageEvent = Exclude<
+  SessionEvent.DurableEvent,
+  typeof SessionEvent.Forked.Type | typeof SessionEvent.Deleted.Type
+>
 
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Message)
 const encodeMessage = Schema.encodeSync(SessionMessage.Message)
@@ -190,7 +193,9 @@ const projectFork = Effect.fn("SessionProjector.projectFork")(function* (
     .insert(SessionTable)
     .values({
       id: event.data.sessionID,
-      parent_id: event.data.parentID,
+      parent_id: null,
+      fork_session_id: event.data.parentID,
+      fork_message_id: event.data.from,
       project_id: parent.project_id,
       workspace_id: parent.workspace_id,
       slug: Slug.create(),
@@ -503,6 +508,9 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionV1.Event.Deleted, (event) =>
       db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
     )
+    yield* events.project(SessionEvent.Deleted, (event) =>
+      db.delete(SessionTable).where(eq(SessionTable.id, event.data.sessionID)).run().pipe(Effect.orDie),
+    )
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
       Effect.gen(function* () {
         const time_created = event.data.info.time.created
@@ -634,6 +642,9 @@ const layer = Layer.effectDiscard(
         })
       }),
     )
+    yield* events.project(SessionEvent.Execution.Succeeded, (event) => run(db, event))
+    yield* events.project(SessionEvent.Execution.Failed, (event) => run(db, event))
+    yield* events.project(SessionEvent.Execution.Interrupted, (event) => run(db, event))
     yield* events.project(SessionEvent.InstructionsUpdated, (event) => run(db, event))
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))
     yield* events.project(SessionEvent.Skill.Activated, (event) =>
@@ -660,7 +671,7 @@ const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.Tool.Failed, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Started, (event) => run(db, event))
     yield* events.project(SessionEvent.Reasoning.Ended, (event) => run(db, event))
-    // yield* events.project(SessionEvent.Retried, (event) => run(db, event))
+    yield* events.project(SessionEvent.RetryScheduled, (event) => run(db, event))
     yield* events.project(SessionEvent.Compaction.Ended, (event) => run(db, event))
     yield* events.project(SessionEvent.RevertEvent.Staged, (event) =>
       db
@@ -687,14 +698,11 @@ const layer = Layer.effectDiscard(
           .select({ seq: SessionMessageTable.seq })
           .from(SessionMessageTable)
           .where(
-            and(
-              eq(SessionMessageTable.session_id, event.data.sessionID),
-              eq(SessionMessageTable.id, event.data.messageID),
-            ),
+            and(eq(SessionMessageTable.session_id, event.data.sessionID), eq(SessionMessageTable.id, event.data.to)),
           )
           .get()
           .pipe(Effect.orDie)
-        if (!boundary) return yield* Effect.die(new Error(`Revert boundary message not found: ${event.data.messageID}`))
+        if (!boundary) return yield* Effect.die(new Error(`Revert boundary message not found: ${event.data.to}`))
         yield* db
           .delete(SessionMessageTable)
           .where(
