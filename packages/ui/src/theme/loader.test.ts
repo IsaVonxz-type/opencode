@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isValidDesktopTheme, loadThemeFromUrl } from "./loader"
+import { isValidDesktopTheme, loadDesktopTheme } from "./loader"
 
 const seeds = {
   neutral: "#111111",
@@ -62,8 +62,53 @@ describe("isValidDesktopTheme", () => {
   })
 })
 
-describe("loadThemeFromUrl", () => {
-  test("rejects non-HTTP URLs", async () => {
-    expect(await loadThemeFromUrl("file:///theme.json")).toEqual({ ok: false, error: "url" })
+describe("loadDesktopTheme", () => {
+  test("converts a TUI theme file into a Desktop theme", () => {
+    const theme = loadDesktopTheme(
+      {
+        defs: {
+          base: "#111111",
+          foreground: "#eeeeee",
+          accent: "#445566",
+        },
+        theme: {
+          background: "base",
+          text: "foreground",
+          primary: { light: "accent", dark: "#778899" },
+          success: "#228844",
+          warning: "#ccaa22",
+          error: "#cc3344",
+          info: "#3377cc",
+          syntaxComment: "#777777",
+        },
+      },
+      "custom-theme",
+    )
+
+    expect(theme?.id).toBe("custom-theme")
+    expect(theme?.light.palette).toMatchObject({
+      neutral: "#111111",
+      ink: "#eeeeee",
+      primary: "#445566",
+    })
+    expect(theme?.dark.palette).toMatchObject({
+      neutral: "#111111",
+      ink: "#eeeeee",
+      primary: "#778899",
+    })
+    expect(theme?.light.overrides?.["syntax-comment"]).toBe("#777777")
+  })
+
+  test("converts repository TUI theme files from the shared themes directory", async () => {
+    const source: unknown = await Bun.file(new URL("../../../../.opencode/themes/mytheme.json", import.meta.url)).json()
+    const theme = loadDesktopTheme(source, "mytheme")
+
+    expect(theme).toMatchObject({
+      id: "mytheme",
+      light: { palette: { neutral: "#ECEFF4", primary: "#5E81AC", accent: "#8FBCBB" } },
+      dark: { palette: { neutral: "#2E3440", primary: "#88C0D0", accent: "#8FBCBB" } },
+      name: "Mytheme",
+    })
+    expect(theme?.dark.overrides?.["background-base"]).toBe("#2E3440")
   })
 })

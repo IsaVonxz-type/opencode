@@ -2,6 +2,7 @@ import { createMemo, createResource, onMount, type Accessor } from "solid-js"
 import type { ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useTheme } from "@opencode-ai/ui/theme/context"
 import { usePermission } from "@/context/permission"
+import { usePlatform } from "@/context/platform"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "@/context/server-sync"
 import {
@@ -16,6 +17,7 @@ import {
   terminalInput,
   useSettings,
 } from "@/context/settings"
+import { loadCustomThemes } from "@/utils/custom-themes"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { createSoundPreviewController, type ShellOption } from "./general-controller-behavior"
 
@@ -72,12 +74,23 @@ export function createShellSettingsController() {
   }
 }
 
-export function createAppearanceSettingsController() {
+export function createAppearanceSettingsController(directory?: Accessor<string | undefined>) {
   const settings = useSettings()
   const theme = useTheme()
+  const platform = usePlatform()
+  const serverSDK = useServerSDK()
+  const serverSync = useServerSync()
   const themes = createMemo(() => theme.ids().map((id) => ({ id, name: theme.name(id) })))
 
-  onMount(() => void theme.loadThemes())
+  onMount(() => {
+    void theme.loadThemes()
+    if (platform.platform !== "desktop") return
+    const currentDirectory = directory?.() ?? serverSync().data.path.directory
+    if (!currentDirectory) return
+    void loadCustomThemes({ sdk: serverSDK(), directory: currentDirectory })
+      .then((result) => theme.setCustomThemes(result))
+      .catch(() => undefined)
+  })
 
   return {
     scheme: {
@@ -88,6 +101,11 @@ export function createAppearanceSettingsController() {
       options: themes,
       current: createMemo(() => themes().find((option) => option.id === theme.themeId())),
       select: (option: { id: string } | null) => option && theme.setTheme(option.id),
+      highlight: (option: { id: string } | undefined) => {
+        if (!option) return undefined
+        theme.previewTheme(option.id)
+        return () => theme.cancelPreview()
+      },
     },
     fonts: {
       ui: createMemo(() => ({

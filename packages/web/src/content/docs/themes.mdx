@@ -121,6 +121,10 @@ Themes use a flexible JSON format with support for:
 - **Dark/light variants**: `{"dark": "#000", "light": "#fff"}`
 - **No color**: `"none"` - Uses the terminal's default color or transparent
 
+### Desktop app themes
+
+The Desktop app discovers theme files from the same user and project `themes/` directories and lists them in Settings → Appearance → Theme. Highlight a theme in the selector to preview its colors across the app. Desktop accepts theme files using `https://opencode.ai/desktop-theme.json` and adapts TUI theme files by mapping their background, text, accent, state, syntax, and diff colors to Desktop tokens.
+
 ---
 
 ### Color definitions

@@ -28,9 +28,9 @@ import {
   useSettings,
 } from "@/context/settings"
 import { decode64 } from "@/utils/base64"
+import { loadCustomThemes } from "@/utils/custom-themes"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { ExternalLink } from "./external-link"
-import { CustomThemeSetting } from "./custom-theme-setting"
 import { SettingsList } from "./settings-list"
 
 let demoSoundState = {
@@ -153,6 +153,12 @@ export const SettingsGeneral: Component = () => {
 
   onMount(() => {
     void theme.loadThemes()
+    if (!desktop()) return
+    const directory = dir() ?? serverSync().data.path.directory
+    if (!directory) return
+    void loadCustomThemes({ sdk: serverSDK(), directory })
+      .then((result) => theme.setCustomThemes(result))
+      .catch(() => undefined)
   })
 
   const autoOption = { id: "auto", value: "", label: language.t("settings.general.row.shell.autoDefault") }
@@ -493,6 +499,11 @@ export const SettingsGeneral: Component = () => {
             current={themeOptions().find((o) => o.id === theme.themeId())}
             value={(o) => o.id}
             label={(o) => o.name}
+            onHighlight={(option) => {
+              if (!option) return undefined
+              theme.previewTheme(option.id)
+              return () => theme.cancelPreview()
+            }}
             onSelect={(option) => {
               if (!option) return
               theme.setTheme(option.id)
@@ -502,15 +513,6 @@ export const SettingsGeneral: Component = () => {
             triggerVariant="settings"
           />
         </SettingsRow>
-
-        <Show when={desktop()}>
-          <SettingsRow
-            title={language.t("settings.general.row.customTheme.title")}
-            description={language.t("settings.general.row.customTheme.description")}
-          >
-            <CustomThemeSetting />
-          </SettingsRow>
-        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.uiFont.title")}

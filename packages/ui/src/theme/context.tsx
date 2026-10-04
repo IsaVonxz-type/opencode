@@ -8,7 +8,7 @@ import oc2ThemeJson from "./themes/oc-2.json"
 import { resolveThemeVariant, themeToCss } from "./resolve"
 import { resolveThemeVariantV2, themeV2ToCss } from "./v2/resolve"
 import type { DesktopTheme } from "./types"
-import { isValidDesktopTheme, loadThemeFromUrl } from "./loader"
+import { isValidDesktopTheme } from "./loader"
 
 export type ColorScheme = "light" | "dark" | "system"
 
@@ -17,8 +17,7 @@ const STORAGE_KEYS = {
   COLOR_SCHEME: "opencode-color-scheme",
   THEME_CSS_LIGHT: "opencode-theme-css-light",
   THEME_CSS_DARK: "opencode-theme-css-dark",
-  CUSTOM_THEME_URL: "opencode-custom-theme-url",
-  CUSTOM_THEME_JSON: "opencode-custom-theme-json",
+  CUSTOM_THEMES: "opencode-custom-themes",
 } as const
 
 const THEME_STYLE_ID = "oc-theme"
@@ -114,16 +113,23 @@ function drop(key: string) {
   } catch {}
 }
 
-function readCustomTheme() {
-  const raw = read(STORAGE_KEYS.CUSTOM_THEME_JSON)
-  if (!raw) return undefined
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function readCustomThemes() {
+  const raw = read(STORAGE_KEYS.CUSTOM_THEMES)
+  if (!raw) return []
   try {
     const value: unknown = JSON.parse(raw)
-    if (isValidDesktopTheme(value) && !knownThemes().has(value.id)) return value
+    if (!Array.isArray(value)) return []
+    return value.filter(
+      (item): item is { id: string; theme: DesktopTheme } =>
+        record(item) && typeof item.id === "string" && isValidDesktopTheme(item.theme) && item.id === item.theme.id,
+    )
   } catch {
-    return undefined
+    return []
   }
-  return undefined
 }
 
 function clear() {
@@ -192,13 +198,10 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     defaultTheme?: string
     onThemeApplied?: (theme: DesktopTheme, mode: "light" | "dark", scheme: ColorScheme) => void
   }) => {
-    const customTheme = readCustomTheme()
-    if (!customTheme && read(STORAGE_KEYS.CUSTOM_THEME_JSON)) {
-      drop(STORAGE_KEYS.CUSTOM_THEME_URL)
-      drop(STORAGE_KEYS.CUSTOM_THEME_JSON)
-    }
+    const customThemes = readCustomThemes()
+    const customThemeIDs = customThemes.map((item) => item.id)
     const storedThemeId = normalize(read(STORAGE_KEYS.THEME_ID) ?? props.defaultTheme) ?? "oc-2"
-    const themeId = knownThemes().has(storedThemeId) || customTheme?.id === storedThemeId ? storedThemeId : "oc-2"
+    const themeId = knownThemes().has(storedThemeId) || customThemeIDs.includes(storedThemeId) ? storedThemeId : "oc-2"
     if (storedThemeId !== themeId) {
       write(STORAGE_KEYS.THEME_ID, themeId)
       clear()
@@ -208,13 +211,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     const [store, setStore] = createStore({
       themes: {
         "oc-2": oc2Theme,
-        ...(customTheme ? { [customTheme.id]: customTheme } : {}),
+        ...Object.fromEntries(customThemes.map((item) => [item.id, item.theme])),
       } as Record<string, DesktopTheme>,
+      customThemeIDs,
       themeId,
       colorScheme,
       mode,
-      customThemeId: customTheme?.id,
-      customThemeUrl: read(STORAGE_KEYS.CUSTOM_THEME_URL) ?? "",
       previewThemeId: null as string | null,
       previewScheme: null as ColorScheme | null,
     })
@@ -343,52 +345,42 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       setStore("mode", scheme === "system" ? getSystemMode() : scheme)
     }
 
-    const setCustomThemeFromUrl = async (url: string) => {
-      const result = await loadThemeFromUrl(url)
-      if (!result.ok) {
+    const setCustomThemes = (input: Array<{ id: string; theme: unknown }>) => {
+      const customThemes = input.filter(
+        (item): item is { id: string; theme: DesktopTheme } =>
+          isValidDesktopTheme(item.theme) && item.id === item.theme.id,
+      )
+      const customThemeIDs = customThemes.map((item) => item.id)
+      const activeTheme = store.themeId
+      const activeThemeRemoved = store.customThemeIDs.includes(activeTheme) && !customThemeIDs.includes(activeTheme)
+      setStore(
+        "themes",
+        produce((themes) => {
+          store.customThemeIDs.forEach((id) => {
+            if (!customThemeIDs.includes(id)) delete themes[id]
+          })
+          customThemes.forEach((item) => {
+            themes[item.id] = item.theme
+          })
+        }),
+      )
+      setStore("customThemeIDs", customThemeIDs)
+      write(STORAGE_KEYS.CUSTOM_THEMES, JSON.stringify(customThemes))
+      if (!activeThemeRemoved) return
+      const file = getFiles()[`./themes/${activeTheme}.json`]
+      if (!file) {
         setTheme("oc-2")
-        return result
+        return
       }
-
-      const theme = result.theme
-      if (knownThemes().has(theme.id) && theme.id !== store.customThemeId) {
-        setTheme("oc-2")
-        return { ok: false as const, error: "invalid" as const }
-      }
-
-      const previous = store.customThemeId
-      if (previous && previous !== theme.id) {
-        setStore(
-          "themes",
-          produce((themes) => void delete themes[previous]),
-        )
-      }
-      setStore("themes", theme.id, theme)
-      setStore("customThemeId", theme.id)
-      setStore("customThemeUrl", url)
-      write(STORAGE_KEYS.CUSTOM_THEME_URL, url)
-      write(STORAGE_KEYS.CUSTOM_THEME_JSON, JSON.stringify(theme))
-      setTheme(theme.id)
-      return { ok: true as const }
-    }
-
-    const removeCustomTheme = () => {
-      const id = store.customThemeId
-      if (id && store.themeId === id) setTheme("oc-2")
-      if (id)
-        setStore(
-          "themes",
-          produce((themes) => void delete themes[id]),
-        )
-      setStore("customThemeId", undefined)
-      setStore("customThemeUrl", "")
-      drop(STORAGE_KEYS.CUSTOM_THEME_URL)
-      drop(STORAGE_KEYS.CUSTOM_THEME_JSON)
+      void file().then((mod) => {
+        if (store.customThemeIDs.includes(activeTheme)) return
+        setStore("themes", activeTheme, mod.default)
+        setTheme(activeTheme)
+      })
     }
 
     return {
       themeId: () => store.themeId,
-      customThemeUrl: () => store.customThemeUrl,
       colorScheme: () => store.colorScheme,
       mode: () => store.mode,
       ids,
@@ -398,8 +390,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       setTheme,
       setColorScheme,
       registerTheme: (theme: DesktopTheme) => setStore("themes", theme.id, theme),
-      setCustomThemeFromUrl,
-      removeCustomTheme,
+      setCustomThemes,
       previewTheme: (id: string) => {
         const next = normalize(id)
         if (!next) return
