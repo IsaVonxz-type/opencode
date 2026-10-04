@@ -156,7 +156,7 @@ export const SettingsGeneral: Component = () => {
     if (!desktop()) return
     const directory = dir() ?? serverSync().data.path.directory
     if (!directory) return
-    void loadCustomThemes({ sdk: serverSDK(), directory })
+    void loadCustomThemes({ sdk: serverSdk(), directory })
       .then((result) => theme.setCustomThemes(result))
       .catch(() => undefined)
   })
