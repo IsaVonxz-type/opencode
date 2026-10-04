@@ -10,6 +10,7 @@ import { usePlatform } from "@/context/platform"
 import { useUpdaterAction } from "../updater-action"
 import { useSettings } from "@/context/settings"
 import { ExternalLink } from "../external-link"
+import { CustomThemeSetting } from "../custom-theme-setting"
 import { SettingsListV2 } from "./parts/list"
 import { SettingsRowV2 } from "./parts/row"
 import { LayoutRetirementNotice, LayoutTransitionToggle } from "./interface-transition"
@@ -168,6 +169,15 @@ const AppearanceSection: Component<{ controller: AppearanceSettingsController }>
             onSelect={props.controller.theme.select}
           />
         </SettingsRowV2>
+
+        <Show when={desktop()}>
+          <SettingsRowV2
+            title={language.t("settings.general.row.customTheme.title")}
+            description={language.t("settings.general.row.customTheme.description")}
+          >
+            <CustomThemeSetting />
+          </SettingsRowV2>
+        </Show>
 
         <FontSetting kind="ui" fonts={props.controller.fonts} />
         <FontSetting kind="code" fonts={props.controller.fonts} />

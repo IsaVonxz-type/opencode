@@ -30,6 +30,7 @@ import {
 import { decode64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { ExternalLink } from "./external-link"
+import { CustomThemeSetting } from "./custom-theme-setting"
 import { SettingsList } from "./settings-list"
 
 let demoSoundState = {
@@ -501,6 +502,15 @@ export const SettingsGeneral: Component = () => {
             triggerVariant="settings"
           />
         </SettingsRow>
+
+        <Show when={desktop()}>
+          <SettingsRow
+            title={language.t("settings.general.row.customTheme.title")}
+            description={language.t("settings.general.row.customTheme.description")}
+          >
+            <CustomThemeSetting />
+          </SettingsRow>
+        </Show>
 
         <SettingsRow
           title={language.t("settings.general.row.uiFont.title")}
